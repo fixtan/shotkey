@@ -83,6 +83,14 @@ mod imp {
         }
     }
 
+    /// 点 (x, y) があるモニタのハンドル (HMONITOR)。windows-capture に渡す。
+    pub fn monitor_handle_at(x: i32, y: i32) -> Option<usize> {
+        unsafe {
+            let h = MonitorFromPoint(POINT { x, y }, MONITOR_DEFAULTTONULL);
+            if h.is_invalid() { None } else { Some(h.0 as usize) }
+        }
+    }
+
     pub fn cursor_pos() -> Option<(i32, i32)> {
         let mut p = POINT::default();
         unsafe { GetCursorPos(&mut p).ok()?; }
@@ -128,6 +136,7 @@ mod imp {
     use super::*;
     pub fn monitors() -> Vec<Rect> { Vec::new() }
     pub fn grab_desktop() -> Result<Bgra, String> { Err("Windows 専用".into()) }
+    pub fn monitor_handle_at(_x: i32, _y: i32) -> Option<usize> { None }
     pub fn cursor_pos() -> Option<(i32, i32)> { None }
     pub fn foreground_window() -> Option<Rect> { None }
     pub fn play_shutter() {}

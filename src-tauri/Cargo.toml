@@ -1,6 +1,6 @@
 [package]
 name = "shotkey"
-version = "0.1.0"
+version = "0.2.0"
 description = "ホットキーで撮って、指定フォルダに保存するだけのスクリーンショットアプリ"
 authors = ["fixtan"]
 edition = "2021"
@@ -24,6 +24,8 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg"]
 arboard = { version = "3", default-features = false, features = ["image-data"] }
 
 [target.'cfg(windows)'.dependencies]
+windows-capture = "2"
+wasapi = "0.25"
 windows = { version = "0.58", features = [
   "Win32_Foundation",
   "Win32_Graphics_Gdi",

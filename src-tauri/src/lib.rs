@@ -4,9 +4,12 @@
 //!   ホットキー → 画面全体を先に 1 枚に固める → (全体 / モニタ / ウィンドウ なら) すぐ切り出して保存
 //!                                           → (範囲 なら) 固めた画面を各モニタに重ねて、その上で範囲を選ぶ
 //! 先に固めるので、右クリックメニューのような「撮ろうとすると消えるもの」も撮れる。
+//!
+//! 録画 (v0.2.0): ホットキーで開始、もう一度押すと停止。ウィンドウ / モニタ / 範囲。システム音つき。録画中は小窓 (REC・時間・停止) を出す。 → record.rs
 
 mod capture;
 mod config;
+mod record;
 
 use config::Config;
 use shotkey_core::{geom, naming, pixels::Bgra};
@@ -31,12 +34,23 @@ enum Action {
     TimerWindow,
     TimerMonitor,
     TimerAll,
+    RecWindow,
+    RecMonitor,
+    RecRegion,
+}
+
+/// 範囲を選んだあと、何をするか
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Purpose {
+    Shot,   // 静止画を撮る
+    Record, // その範囲を録画する
 }
 
 /// 範囲選択のあいだだけ持つ、固めた画面
 struct Frozen {
     desktop: Bgra,
     monitors: Vec<geom::Rect>,
+    purpose: Purpose,
 }
 
 struct AppState {
@@ -46,6 +60,7 @@ struct AppState {
     keys: Mutex<HashMap<u32, Action>>, // ホットキーの id → 何をするか
     busy: AtomicBool,                  // 撮影中 (範囲選択中も含む) は、次のホットキーを受けない
     key_errors: Mutex<Vec<String>>,    // 登録できなかったホットキーの説明
+    rec: Mutex<Option<record::Session>>, // 録画中なら、その録画
 }
 
 // ---- 保存 ----
@@ -63,10 +78,9 @@ fn tooltip(app: &AppHandle, text: &str) {
     }
 }
 
-/// 撮った画像を、設定どおりに保存する。保存したファイルのパスを返す。
-fn save_image(app: &AppHandle, img: &Bgra) -> Result<PathBuf, String> {
-    let cfg = app.state::<AppState>().cfg.lock().unwrap().clone();
-    let dir = save_dir(app, &cfg);
+/// 保存するファイルのパス。連番は、保存先にある同じ形の名前の一番大きい番号 + 1。
+fn next_path(app: &AppHandle, cfg: &Config, template: &str, ext: &str) -> Result<PathBuf, String> {
+    let dir = save_dir(app, cfg);
     std::fs::create_dir_all(&dir).map_err(|e| format!("保存先のフォルダを作れませんでした: {e}"))?;
 
     let now = chrono::Local::now();
@@ -74,10 +88,16 @@ fn save_image(app: &AppHandle, img: &Bgra) -> Result<PathBuf, String> {
     let existing: Vec<String> = std::fs::read_dir(&dir)
         .map(|rd| rd.filter_map(|e| e.ok()).filter_map(|e| e.file_name().into_string().ok()).collect())
         .unwrap_or_default();
-    let n = naming::next_number(&cfg.template, &existing, &date, &time);
-    let stem = naming::sanitize(&naming::render(&cfg.template, n, cfg.digits, &date, &time));
+    let n = naming::next_number(template, &existing, &date, &time);
+    let stem = naming::sanitize(&naming::render(template, n, cfg.digits, &date, &time));
+    Ok(dir.join(format!("{stem}.{ext}")))
+}
+
+/// 撮った画像を、設定どおりに保存する。保存したファイルのパスを返す。
+fn save_image(app: &AppHandle, img: &Bgra) -> Result<PathBuf, String> {
+    let cfg = app.state::<AppState>().cfg.lock().unwrap().clone();
     let ext = if cfg.format == "jpg" { "jpg" } else { "png" };
-    let path = dir.join(format!("{stem}.{ext}"));
+    let path = next_path(app, &cfg, &cfg.template, ext)?;
 
     // 音は、書き出しを待たずに、撮れた瞬間に鳴らす (大きい画像は、PNG の圧縮に時間がかかる)
     if cfg.sound {
@@ -115,6 +135,113 @@ fn save_image(app: &AppHandle, img: &Bgra) -> Result<PathBuf, String> {
     Ok(path)
 }
 
+// ---- 録画 ----
+
+fn start_recording(app: &AppHandle, target: record::Target, crop: Option<(u32, u32, u32, u32)>) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    if state.rec.lock().unwrap().is_some() {
+        return Err("すでに録画中です".into());
+    }
+    let cfg = state.cfg.lock().unwrap().clone();
+    let path = next_path(app, &cfg, &cfg.video_template, "mp4")?;
+    let session = record::start(
+        target,
+        record::Options {
+            path: path.clone(),
+            fps: cfg.video_fps,
+            bitrate: cfg.video_mbps * 1_000_000,
+            cursor: cfg.video_cursor,
+            audio: cfg.video_audio,
+            crop,
+        },
+    )?;
+    let audio_error = session.audio_error.clone();
+    *state.rec.lock().unwrap() = Some(session);
+    if cfg.sound {
+        capture::play_shutter();
+    }
+    open_rec_window(app, cfg.video_limit_secs);
+    if cfg.video_limit_secs > 0 {
+        // 時間になったら、自動で止める (その前に手で止められていたら、何もしない)
+        let app2 = app.clone();
+        std::thread::spawn(move || {
+            for _ in 0..cfg.video_limit_secs {
+                std::thread::sleep(std::time::Duration::from_secs(1));
+                let same = app2.state::<AppState>().rec.lock().unwrap().as_ref().map(|s| s.path == path);
+                if same != Some(true) {
+                    return;
+                }
+            }
+            stop_recording_blocking(&app2);
+        });
+    }
+    match audio_error {
+        Some(e) => tooltip(app, &format!("shotkey — 録画中 (音は録れていません: {e})")),
+        None => tooltip(app, "shotkey — 録画中 (録画のホットキーをもう一度押すと停止)"),
+    }
+    Ok(())
+}
+
+/// 録画中だけ出す小窓: ● REC・経過時間・停止ボタン。録画には写らない (キャプチャ除外)。
+fn open_rec_window(app: &AppHandle, limit_secs: u32) {
+    let built = WebviewWindowBuilder::new(app, "rec", WebviewUrl::App(format!("rec.html?limit={limit_secs}").into()))
+        .title("shotkey 録画中")
+        .inner_size(210.0, 40.0)
+        .decorations(false)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .resizable(false)
+        .shadow(false)
+        .focused(false)
+        .content_protected(true) // 録画・スクショに写さない
+        .build();
+    match built {
+        Ok(win) => {
+            // 手前のモニタの、上の真ん中あたり
+            if let Ok(Some(mon)) = app.primary_monitor() {
+                let scale = mon.scale_factor();
+                let (mp, ms) = (mon.position(), mon.size());
+                let w = (210.0 * scale) as i32;
+                let x = mp.x + (ms.width as i32 - w) / 2;
+                let y = mp.y + (12.0 * scale) as i32;
+                let _ = win.set_position(PhysicalPosition::new(x, y));
+            }
+        }
+        Err(e) => eprintln!("shotkey: 録画の小窓を作れませんでした: {e}"),
+    }
+}
+
+fn close_rec_window(app: &AppHandle) {
+    if let Some(w) = app.get_webview_window("rec") {
+        let _ = w.destroy();
+    }
+}
+
+/// 小窓の「停止」ボタン
+#[tauri::command]
+fn stop_rec(app: AppHandle) {
+    stop_recording(&app);
+}
+
+/// 録画を止めて、MP4 を閉じる (終わるまで待つ)。録画中でなければ、何もしない。
+fn stop_recording_blocking(app: &AppHandle) {
+    let session = app.state::<AppState>().rec.lock().unwrap().take();
+    if session.is_some() {
+        close_rec_window(app);
+    }
+    if let Some(s) = session {
+        match s.stop() {
+            Ok(p) => tooltip(app, &format!("shotkey — 録画を保存しました: {}", p.file_name().and_then(|s| s.to_str()).unwrap_or(""))),
+            Err(e) => report_error(app, &format!("録画を保存できませんでした: {e}")),
+        }
+    }
+}
+
+fn stop_recording(app: &AppHandle) {
+    let app = app.clone();
+    std::thread::spawn(move || stop_recording_blocking(&app));
+}
+
 fn report_error(app: &AppHandle, msg: &str) {
     eprintln!("shotkey: {msg}");
     tooltip(app, &format!("shotkey — 失敗しました: {msg}"));
@@ -140,6 +267,17 @@ fn do_action(app: &AppHandle, action: Action) -> Result<(), String> {
         a => a,
     };
 
+    // 録画 (ウィンドウ / モニタ) は、画面を固めずに、すぐ始める
+    match action {
+        Action::RecWindow => return start_recording(app, record::Target::Window, None),
+        Action::RecMonitor => {
+            let (cx, cy) = capture::cursor_pos().ok_or("マウスの位置を取得できませんでした")?;
+            let h = capture::monitor_handle_at(cx, cy).ok_or("マウスがどのモニタの上にもありません")?;
+            return start_recording(app, record::Target::Monitor(h), None);
+        }
+        _ => {}
+    }
+
     // ウィンドウは、固める前に調べる (固めたあとでは、手前のウィンドウが変わりうる)
     let fg = if action == Action::Window { capture::foreground_window() } else { None };
     let cursor = capture::cursor_pos();
@@ -157,12 +295,13 @@ fn do_action(app: &AppHandle, action: Action) -> Result<(), String> {
             let r = fg.ok_or("手前のウィンドウが見つかりません")?;
             desktop.crop(&r).ok_or("ウィンドウが画面の外にあります")?
         }
-        Action::Region => {
-            *state.frozen.lock().unwrap() = Some(Frozen { desktop, monitors: monitors.clone() });
+        Action::Region | Action::RecRegion => {
+            let purpose = if action == Action::RecRegion { Purpose::Record } else { Purpose::Shot };
+            *state.frozen.lock().unwrap() = Some(Frozen { desktop, monitors: monitors.clone(), purpose });
             open_overlays(app, &monitors, cursor)?;
-            return Ok(()); // 保存は、選び終わったとき (finish_region)
+            return Ok(()); // 保存 (録画の開始) は、選び終わったとき (finish_region)
         }
-        Action::TimerWindow | Action::TimerMonitor | Action::TimerAll => unreachable!(),
+        Action::TimerWindow | Action::TimerMonitor | Action::TimerAll | Action::RecWindow | Action::RecMonitor => unreachable!(),
     };
     save_image(app, &shot)?;
     Ok(())
@@ -171,13 +310,18 @@ fn do_action(app: &AppHandle, action: Action) -> Result<(), String> {
 /// ホットキーが押されたとき。撮影は別のスレッドでやる (イベントの処理を止めない)
 fn run_action(app: &AppHandle, action: Action) {
     let state = app.state::<AppState>();
+    // 録画のホットキーは、録画中なら「停止」になる
+    if matches!(action, Action::RecWindow | Action::RecMonitor | Action::RecRegion) && state.rec.lock().unwrap().is_some() {
+        stop_recording(app);
+        return;
+    }
     if state.busy.swap(true, Ordering::SeqCst) {
         return; // 撮影中
     }
     let app = app.clone();
     std::thread::spawn(move || {
         let result = do_action(&app, action);
-        let keep_busy = action == Action::Region && result.is_ok(); // 範囲選択は、選び終わるまで続く
+        let keep_busy = matches!(action, Action::Region | Action::RecRegion) && result.is_ok(); // 範囲選択は、選び終わるまで続く
         if let Err(e) = result {
             report_error(&app, &e);
         }
@@ -247,21 +391,51 @@ fn get_snap(m: usize, state: State<AppState>) -> Result<Response, String> {
 /// 選び終わった。x, y, w, h は、そのモニタの左上からの物理ピクセル。
 #[tauri::command]
 fn finish_region(app: AppHandle, m: usize, x: i32, y: i32, w: i32, h: i32) -> Result<(), String> {
-    let shot = {
+    let (purpose, shot, mon) = {
         let state = app.state::<AppState>();
         let frozen = state.frozen.lock().unwrap();
         let f = frozen.as_ref().ok_or("固めた画面がありません")?;
-        let mon = f.monitors.get(m).ok_or("モニタの番号が正しくありません")?;
-        let r = geom::Rect::new(mon.x + x, mon.y + y, w, h);
-        f.desktop.crop(&r)
+        let mon = *f.monitors.get(m).ok_or("モニタの番号が正しくありません")?;
+        let shot = if f.purpose == Purpose::Shot {
+            f.desktop.crop(&geom::Rect::new(mon.x + x, mon.y + y, w, h))
+        } else {
+            None
+        };
+        (f.purpose, shot, mon)
     };
     // 重ね画面を閉じるのは、このコマンドが返ったあと (自分の窓を、自分の処理の中で壊さない)
     let app2 = app.clone();
     std::thread::spawn(move || {
         end_selection(&app2);
-        if let Some(img) = shot {
-            if let Err(e) = save_image(&app2, &img) {
-                report_error(&app2, &e);
+        match purpose {
+            Purpose::Shot => {
+                if let Some(img) = shot {
+                    if let Err(e) = save_image(&app2, &img) {
+                        report_error(&app2, &e);
+                    }
+                }
+            }
+            Purpose::Record => {
+                // 重ね画面が録画に写り込まないように、閉じ終わるのを少し待つ
+                std::thread::sleep(std::time::Duration::from_millis(400));
+                // H.264 は、幅と高さが偶数でないといけない
+                let (w, h) = (w & !1, h & !1);
+                let result = if w <= 0 || h <= 0 {
+                    Err("範囲が小さすぎます".to_string())
+                } else {
+                    capture::monitor_handle_at(mon.x + mon.w / 2, mon.y + mon.h / 2)
+                        .ok_or_else(|| "モニタが見つかりません".to_string())
+                        .and_then(|handle| {
+                            start_recording(
+                                &app2,
+                                record::Target::Monitor(handle),
+                                Some((x as u32, y as u32, (x + w) as u32, (y + h) as u32)),
+                            )
+                        })
+                };
+                if let Err(e) = result {
+                    report_error(&app2, &e);
+                }
             }
         }
     });
@@ -290,6 +464,9 @@ fn apply_hotkeys(app: &AppHandle, cfg: &Config) -> Vec<String> {
         (Action::TimerWindow, "タイマー (ウィンドウ)", &hk.timer_window),
         (Action::TimerMonitor, "タイマー (モニタ)", &hk.timer_monitor),
         (Action::TimerAll, "タイマー (全体)", &hk.timer_all),
+        (Action::RecWindow, "録画 (ウィンドウ)", &hk.rec_window),
+        (Action::RecMonitor, "録画 (モニタ)", &hk.rec_monitor),
+        (Action::RecRegion, "録画 (範囲)", &hk.rec_region),
     ] {
         let text = text.trim();
         if text.is_empty() {
@@ -393,13 +570,15 @@ pub fn run() {
                 keys: Mutex::new(HashMap::new()),
                 busy: AtomicBool::new(false),
                 key_errors: Mutex::new(Vec::new()),
+                rec: Mutex::new(None),
             });
 
             // トレイ
             let open = MenuItem::with_id(app, "open", "設定を開く", true, None::<&str>)?;
             let folder = MenuItem::with_id(app, "folder", "保存先を開く", true, None::<&str>)?;
+            let stop = MenuItem::with_id(app, "stop_rec", "録画を停止", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "終了", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&open, &folder, &quit])?;
+            let menu = Menu::with_items(app, &[&open, &folder, &stop, &quit])?;
             TrayIconBuilder::with_id("main")
                 .icon(app.default_window_icon().cloned().ok_or("アイコンがありません")?)
                 .tooltip("shotkey")
@@ -408,7 +587,11 @@ pub fn run() {
                 .on_menu_event(|app, ev| match ev.id.as_ref() {
                     "open" => show_main(app),
                     "folder" => open_folder(app),
-                    "quit" => app.exit(0),
+                    "stop_rec" => stop_recording(app),
+                    "quit" => {
+                        stop_recording_blocking(app); // 録画中に終わっても、MP4 を壊さない
+                        app.exit(0)
+                    }
                     _ => {}
                 })
                 .on_tray_icon_event(|tray, ev| {
@@ -444,7 +627,8 @@ pub fn run() {
             open_save_dir,
             get_snap,
             finish_region,
-            cancel_region
+            cancel_region,
+            stop_rec
         ])
         .run(tauri::generate_context!())
         .expect("shotkey の起動に失敗");

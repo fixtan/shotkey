@@ -41,7 +41,8 @@ const mock = (cfg) => `
     } } } };`;
 
 const baseCfg = { save_dir: '', template: 'shot_{date}_{n}', digits: 3, format: 'png', jpg_quality: 90, clipboard: false, sound: true,
-  timer_secs: 5, hotkeys: { all: 'Ctrl+Alt+1', monitor: 'Ctrl+Alt+2', window: 'Ctrl+Alt+3', region: 'Ctrl+Alt+4', timer_window: 'Ctrl+Alt+5', timer_monitor: '', timer_all: '' } };
+  timer_secs: 5, video_template: 'rec_{date}_{n}', video_fps: 30, video_mbps: 8, video_cursor: true, video_audio: true, video_limit_secs: 0,
+  hotkeys: { all: 'Ctrl+Alt+1', monitor: 'Ctrl+Alt+2', window: 'Ctrl+Alt+3', region: 'Ctrl+Alt+4', timer_window: 'Ctrl+Alt+5', timer_monitor: '', timer_all: '', rec_window: 'Ctrl+Alt+8', rec_monitor: 'Ctrl+Alt+9', rec_region: 'Ctrl+Alt+0' } };
 
 const browser = await chromium.launch();
 
@@ -109,6 +110,7 @@ const browser = await chromium.launch();
   await page.addInitScript(mock(baseCfg));
   await page.goto(base + '/index.html');
   await page.waitForFunction(() => document.getElementById('hk_all')?.value);
+  check('録画のホットキーが入る', (await page.inputValue('#hk_rec_region')) === 'Ctrl+Alt+0');
   check('ホットキーが入る', (await page.inputValue('#hk_all')) === 'Ctrl+Alt+1' && (await page.inputValue('#hk_timer_monitor')) === '' && (await page.inputValue('#hk_timer_window')) === 'Ctrl+Alt+5');
   check('登録できなかった説明を出す', (await page.textContent('#key-errors')).includes('登録できない'));
   check('保存される場所を出す', (await page.textContent('#dir-now')).includes('Pictures'));
@@ -130,10 +132,18 @@ const browser = await chromium.launch();
   await page.selectOption('#format', 'jpg');
   await page.check('#clipboard');
   await page.click('#hk_timer_monitor'); await page.keyboard.press('Control+Shift+F5');
+  await page.selectOption('#video_fps', '60');
+  await page.fill('#video_mbps', '12');
+  await page.uncheck('#video_cursor');
+  await page.selectOption('#video_limit_secs', '60');
+  await page.uncheck('#video_audio');
   await page.click('#save');
   await page.waitForFunction(() => window.__calls.some((c) => c.cmd === 'set_config'));
   const sent = await page.evaluate(() => window.__calls.find((c) => c.cmd === 'set_config').args.cfg);
   check('保存に画面の値が渡る', sent.template === 'cap_{n}' && sent.format === 'jpg' && sent.clipboard === true && sent.digits === 3 && sent.timer_secs === 5, JSON.stringify(sent));
+  check('録画の自動停止と音の設定が渡る', sent.video_limit_secs === 60 && typeof sent.video_limit_secs === 'number' && sent.video_audio === false, JSON.stringify([sent.video_limit_secs, sent.video_audio]));
+  check('動画の設定が、数値として渡る', sent.video_fps === 60 && sent.video_mbps === 12 && sent.video_cursor === false && sent.video_template === 'rec_{date}_{n}' && typeof sent.video_fps === 'number', JSON.stringify([sent.video_fps, sent.video_mbps, sent.video_cursor]));
+  check('録画のホットキーも渡る', sent.hotkeys.rec_window === 'Ctrl+Alt+8' && sent.hotkeys.rec_monitor === 'Ctrl+Alt+9' && sent.hotkeys.rec_region === 'Ctrl+Alt+0', JSON.stringify(sent.hotkeys));
   check('ホットキーも渡る', sent.hotkeys.all === 'Ctrl+Alt+1' && sent.hotkeys.window === '' && sent.hotkeys.timer_monitor === 'Ctrl+Shift+F5' && sent.hotkeys.timer_window === 'Ctrl+Alt+5' && sent.hotkeys.timer_all === '', JSON.stringify(sent.hotkeys));
   await ctx.close();
 }

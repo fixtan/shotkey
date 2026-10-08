@@ -41,6 +41,29 @@
     </section>
 
     <section>
+      <h2>動画 (録画)</h2>
+      <p class="dim">録画のホットキーを押すと開始、もう一度押すと停止します (トレイの「録画を停止」でも止められます)。録画中は、画面の上に小さな窓 (● REC・経過時間・停止ボタン) が出ます。この窓は録画には写りません。保存先は、静止画と同じです。</p>
+      <label class="row">ファイル名
+        <input type="text" id="video_template" />
+      </label>
+      <div class="row2">
+        <label>フレームレート
+          <select id="video_fps"><option value="30">30 fps</option><option value="60">60 fps</option></select>
+        </label>
+        <label>画質 (Mbps) <input type="number" id="video_mbps" min="1" max="100" /></label>
+      </div>
+      <label class="row">自動で止める
+        <select id="video_limit_secs">
+          <option value="0">止めない</option><option value="30">30 秒</option><option value="60">1 分</option>
+          <option value="180">3 分</option><option value="300">5 分</option><option value="600">10 分</option>
+          <option value="1800">30 分</option><option value="3600">1 時間</option>
+        </select>
+      </label>
+      <label class="check"><input type="checkbox" id="video_cursor" /> マウスカーソルを録画に入れる</label>
+      <label class="check"><input type="checkbox" id="video_audio" /> パソコンから出ている音を録る (マイクは録りません)</label>
+    </section>
+
+    <section>
       <h2>タイマー</h2>
       <div class="row2">
         <label>待つ秒数 <input type="number" id="timer_secs" min="0" max="120" /></label>

@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "設定画面と、範囲選択の重ね画面 (ov0, ov1 …)",
-  "windows": ["main", "ov*"],
-  "permissions": ["core:default"]
+  "description": "設定画面と、範囲選択の重ね画面 (ov0, ov1 …)、録画中の小窓 (rec)",
+  "windows": ["main", "ov*", "rec"],
+  "permissions": ["core:default", "core:window:allow-start-dragging"]
 }

@@ -10,9 +10,14 @@ const KEYS = [
   ['timer_window', 'タイマー: ウィンドウ'],
   ['timer_monitor', 'タイマー: モニタ'],
   ['timer_all', 'タイマー: 全体'],
+  ['rec_window', '録画: ウィンドウ'],
+  ['rec_monitor', '録画: モニタ'],
+  ['rec_region', '録画: 範囲'],
 ];
-const FIELDS = ['save_dir', 'template', 'digits', 'format', 'jpg_quality', 'timer_secs'];
-const CHECKS = ['clipboard', 'sound'];
+const FIELDS = ['save_dir', 'template', 'digits', 'format', 'jpg_quality', 'timer_secs', 'video_template', 'video_fps', 'video_mbps', 'video_limit_secs'];
+const CHECKS = ['clipboard', 'sound', 'video_cursor', 'video_audio'];
+// Rust 側が数値を期待する項目。select の値は文字列で来るので、数値にして渡す
+const NUMERIC = new Set(['digits', 'jpg_quality', 'timer_secs', 'video_fps', 'video_mbps', 'video_limit_secs']);
 
 // ---- ホットキーの入力 ----
 // キーの位置 (code) で名前を作る。日本語配列でも英語配列でも同じ。
@@ -70,7 +75,7 @@ function fill(cfg) {
 
 function collect() {
   const cfg = { hotkeys: {} };
-  for (const f of FIELDS) cfg[f] = $(f).type === 'number' ? Number($(f).value) : $(f).value;
+  for (const f of FIELDS) cfg[f] = NUMERIC.has(f) ? Number($(f).value) : $(f).value;
   for (const c of CHECKS) cfg[c] = $(c).checked;
   for (const [id] of KEYS) cfg.hotkeys[id] = $('hk_' + id).value;
   return cfg;
