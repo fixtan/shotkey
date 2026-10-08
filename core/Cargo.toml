@@ -1,0 +1,7 @@
+[package]
+name = "shotkey-core"
+version = "0.1.0"
+edition = "2021"
+description = "shotkey: OS に依存しない部分 (座標計算・ファイル名の連番)"
+
+[dependencies]

@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>shotkey</title>
+    <link rel="stylesheet" href="styles.css" />
+    <script type="module" src="settings.js" defer></script>
+  </head>
+  <body>
+    <h1>shotkey</h1>
+    <p class="lead">ホットキーで撮って、フォルダに保存するだけです。この窓を閉じても、トレイに残って待機します。</p>
+
+    <section>
+      <h2>ホットキー</h2>
+      <p class="dim">入力欄をクリックして、使いたいキーを押してください。Delete / Backspace で空にできます (そのホットキーは使わない設定)。</p>
+      <div class="keys" id="keys"></div>
+      <div id="key-errors" class="err" hidden></div>
+    </section>
+
+    <section>
+      <h2>保存</h2>
+      <label class="row">保存先
+        <input type="text" id="save_dir" placeholder="空欄ならピクチャ\shotkey" />
+      </label>
+      <div class="dim" id="dir-now"></div>
+      <div class="row"><button id="open-dir" type="button">保存先を開く</button></div>
+      <label class="row">ファイル名
+        <input type="text" id="template" />
+      </label>
+      <div class="dim">{n} 連番 / {date} 日付 / {time} 時刻 — 例: <span id="template-ex"></span></div>
+      <div class="row2">
+        <label>連番の桁 <input type="number" id="digits" min="1" max="9" /></label>
+        <label>形式
+          <select id="format"><option value="png">PNG</option><option value="jpg">JPEG</option></select>
+        </label>
+        <label>JPEG 品質 <input type="number" id="jpg_quality" min="1" max="100" /></label>
+      </div>
+      <label class="check"><input type="checkbox" id="clipboard" /> 撮ったらクリップボードにも入れる</label>
+      <label class="check"><input type="checkbox" id="sound" /> 撮れた瞬間に、シャッター音を鳴らす</label>
+    </section>
+
+    <section>
+      <h2>タイマー</h2>
+      <div class="row2">
+        <label>待つ秒数 <input type="number" id="timer_secs" min="0" max="120" /></label>
+      </div>
+      <div class="dim">ホットキーを押してから待つあいだに、撮りたいウィンドウを手前に出したり、メニューを開いたりします。撮るのは「待ったあとに、手前にあるもの」です。</div>
+    </section>
+
+    <div class="bar">
+      <button id="save" type="button" class="primary">保存して、ホットキーを登録し直す</button>
+      <button id="reset" type="button">初期値に戻す</button>
+      <span id="msg" class="msg"></span>
+    </div>
+  </body>
+</html>

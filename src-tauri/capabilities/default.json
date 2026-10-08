@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "設定画面と、範囲選択の重ね画面 (ov0, ov1 …)",
+  "windows": ["main", "ov*"],
+  "permissions": ["core:default"]
+}

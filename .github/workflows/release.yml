@@ -1,0 +1,27 @@
+# タグ (v0.1.0 など) を push すると、Windows のインストーラーを作って、Releases に下書きで置く。
+# 使い方:  git tag v0.1.0  →  git push origin v0.1.0
+# 注意: 署名していないので、最初に SmartScreen が警告を出す。Windows 専用。
+name: release
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - uses: dtolnay/rust-toolchain@stable
+      - run: npm install
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: 'shotkey ${{ github.ref_name }}'
+          releaseDraft: true
+          prerelease: false
+          args: '--bundles nsis'
