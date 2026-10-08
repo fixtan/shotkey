@@ -3,6 +3,13 @@
 ホットキーで撮って、指定フォルダに保存するだけの、Windows 用スクリーンショットアプリ。
 撮るのが目的なので、編集はしない (編集は [Lookover](https://github.com/fixtan/lookover) でやる)。
 
+インストーラーは [Releases](https://github.com/fixtan/shotkey/releases/latest) にあります (署名していないので、初回は SmartScreen が警告を出します)。
+
+<p>
+  <img src="docs/settings-1.webp" alt="shotkey 設定画面 (ホットキー)" width="260" />
+  <img src="docs/settings-2.webp" alt="shotkey 設定画面 (保存・録画・タイマー)" width="260" />
+</p>
+
 ## 撮れるもの (静止画)
 
 | ホットキー (初期値) | 撮るもの |
