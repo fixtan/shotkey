@@ -80,7 +80,10 @@ impl Default for Config {
 impl Config {
     /// 壊れた値を、使える範囲に直す
     pub fn normalized(mut self) -> Config {
-        if self.format != "png" && self.format != "jpg" { self.format = "png".into(); }
+        //if self.format != "png" && self.format != "jpg" { self.format = "png".into(); }
+        if self.format != "png" && self.format != "jpg" && self.format != "webp" {
+            self.format = "png".into();
+        }
         self.jpg_quality = self.jpg_quality.clamp(1, 100);
         self.digits = self.digits.clamp(1, 9);
         self.timer_secs = self.timer_secs.min(120);

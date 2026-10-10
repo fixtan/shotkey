@@ -87,7 +87,11 @@ function previewName() {
   const time = `${p(now.getHours())}${p(now.getMinutes())}${p(now.getSeconds())}`;
   const digits = Math.max(1, Math.min(9, Number($('digits').value) || 3));
   const name = $('template').value.replaceAll('{n}', p(1, digits)).replaceAll('{date}', date).replaceAll('{time}', time);
-  $('template-ex').textContent = name + '.' + ($('format').value === 'jpg' ? 'jpg' : 'png');
+  //$('template-ex').textContent = name + '.' + ($('format').value === 'jpg' ? 'jpg' : 'png');
+  // 修正
+  const fmt = $('format').value;
+  const ext = fmt === 'jpg' ? 'jpg' : (fmt === 'webp' ? 'webp' : 'png');
+  $('template-ex').textContent = name + '.' + ext;
 }
 
 async function showDir() {

@@ -96,7 +96,13 @@ fn next_path(app: &AppHandle, cfg: &Config, template: &str, ext: &str) -> Result
 /// 撮った画像を、設定どおりに保存する。保存したファイルのパスを返す。
 fn save_image(app: &AppHandle, img: &Bgra) -> Result<PathBuf, String> {
     let cfg = app.state::<AppState>().cfg.lock().unwrap().clone();
-    let ext = if cfg.format == "jpg" { "jpg" } else { "png" };
+
+    // 拡張子の判定（webp を追加）
+    let ext = match cfg.format.to_lowercase().as_str() {
+        "jpg" | "jpeg" => "jpg",
+        "webp" => "webp",
+        _ => "png",
+    };
     let path = next_path(app, &cfg, &cfg.template, ext)?;
 
     // 音は、書き出しを待たずに、撮れた瞬間に鳴らす (大きい画像は、PNG の圧縮に時間がかかる)
@@ -106,23 +112,34 @@ fn save_image(app: &AppHandle, img: &Bgra) -> Result<PathBuf, String> {
 
     let rgba = img.to_rgba();
     let (w, h) = (img.w as u32, img.h as u32);
-    if ext == "jpg" {
-        // JPEG はアルファを持てない
-        let rgb: Vec<u8> = rgba.chunks_exact(4).flat_map(|p| [p[0], p[1], p[2]]).collect();
-        let file = std::fs::File::create(&path).map_err(|e| e.to_string())?;
-        let enc = image::codecs::jpeg::JpegEncoder::new_with_quality(std::io::BufWriter::new(file), cfg.jpg_quality);
-        let buf = image::RgbImage::from_raw(w, h, rgb).ok_or("画素の数が合いません")?;
-        buf.write_with_encoder(enc).map_err(|e| e.to_string())?;
-    } else {
-        // 圧縮は軽め (Fast + Sub)。ファイルは少し大きくなるが、書き出しがずっと速い
-        let file = std::fs::File::create(&path).map_err(|e| e.to_string())?;
-        let enc = image::codecs::png::PngEncoder::new_with_quality(
-            std::io::BufWriter::new(file),
-            image::codecs::png::CompressionType::Fast,
-            image::codecs::png::FilterType::Sub,
-        );
-        let buf = image::RgbaImage::from_raw(w, h, rgba.clone()).ok_or("画素の数が合いません")?;
-        buf.write_with_encoder(enc).map_err(|e| e.to_string())?;
+
+    match ext {
+        "jpg" => {
+            // JPEG はアルファを持てない
+            let rgb: Vec<u8> = rgba.chunks_exact(4).flat_map(|p| [p[0], p[1], p[2]]).collect();
+            let file = std::fs::File::create(&path).map_err(|e| e.to_string())?;
+            let enc = image::codecs::jpeg::JpegEncoder::new_with_quality(std::io::BufWriter::new(file), cfg.jpg_quality);
+            let buf = image::RgbImage::from_raw(w, h, rgb).ok_or("画素の数が合いません")?;
+            buf.write_with_encoder(enc).map_err(|e| e.to_string())?;
+        }
+        "webp" => {
+            // webp クレート（libwebp）を使って Python (Pillow quality=85) と同じ非可逆エンコード
+            let encoder = webp::Encoder::from_rgba(&rgba, w, h);
+            // 品質設定 (85.0)
+            let webp_data = encoder.encode(85.0);
+            std::fs::write(&path, &*webp_data).map_err(|e| e.to_string())?;
+        }
+        _ => {
+            // 圧縮は軽め (Fast + Sub)。ファイルは少し大きくなるが、書き出しがずっと速い
+            let file = std::fs::File::create(&path).map_err(|e| e.to_string())?;
+            let enc = image::codecs::png::PngEncoder::new_with_quality(
+                std::io::BufWriter::new(file),
+                image::codecs::png::CompressionType::Fast,
+                image::codecs::png::FilterType::Sub,
+            );
+            let buf = image::RgbaImage::from_raw(w, h, rgba.clone()).ok_or("画素の数が合いません")?;
+            buf.write_with_encoder(enc).map_err(|e| e.to_string())?;
+        }
     }
 
     if cfg.clipboard {
