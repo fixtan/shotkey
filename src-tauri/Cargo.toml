@@ -1,6 +1,6 @@
 [package]
 name = "shotkey"
-version = "0.3.0"
+version = "0.3.1"
 description = "ホットキーで撮って、指定フォルダに保存するだけのスクリーンショットアプリ"
 authors = ["fixtan"]
 edition = "2021"
